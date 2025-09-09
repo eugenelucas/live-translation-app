@@ -17,6 +17,16 @@ function App() {
   const [detectReason, setDetectReason] = useState('');
   const [lastCheckedAt, setLastCheckedAt] = useState(null);
 
+
+  const [autoCorrectEnabled, setAutoCorrectEnabled] = useState(true);
+  const [correctStatus, setCorrectStatus] = useState('Idle'); // 'Idle' | 'Checking' | 'OK' | 'Error'
+
+  const [corrected, setCorrected] = useState('');          // corrected transcript
+  const [lastCorrectedAt, setLastCorrectedAt] = useState(null);
+
+  const correctInFlightRef = useRef(0);     // request de-dupe
+  const correctDebounceRef = useRef(null);  // simple debounce timer
+
   const recognizerRef = useRef(null);
   const scrollRef = useRef(null);
   const detectInFlightRef = useRef(0); // basic request de-dupe
@@ -76,6 +86,7 @@ function App() {
           // Trigger anomaly detection only on finalized updates
           // (If you want to detect on every partial too, also call checkAnomaly in 'recognizing')
           checkAnomaly(next);
+          scheduleAutoCorrect(next);
           return next;
         });
       }
@@ -107,10 +118,18 @@ function App() {
       },
       err => setError(String(err))
     );
+    if (correctDebounceRef.current) {
+  window.clearTimeout(correctDebounceRef.current);
+  correctDebounceRef.current = null;
+}
   }
 
   // Cleanup on unmount
   useEffect(() => {
+    if (correctDebounceRef.current) {
+  window.clearTimeout(correctDebounceRef.current);
+  correctDebounceRef.current = null;
+}
     return () => {
       if (recognizerRef.current) {
         recognizerRef.current.stopContinuousRecognitionAsync(() => {
@@ -193,7 +212,48 @@ function App() {
       return { isAnomaly: false, reason: 'No issues detected....' };
     }
   }
- 
+ async function autoCorrectTranscript(_text) {
+  const text = String(_text || '').trim();
+  if (!text) return '';
+
+    const systemPrompt = `
+  You are a careful, minimal copy editor for live transcripts.
+- Fix grammar, punctuation, casing, and obvious ASR errors.
+- Do NOT change meaning or add/remove facts.
+- Preserve line breaks and speaker turns.
+- Also remove common disfluencies (um/umm/uh/er/erm/eh/hmm/mmm/mm/ah, "uh-huh"/"mm-hmm",
+  and the phrases "I mean" and "you know" when they appear as fillers).
+Return ONLY the corrected text.
+    `.trim();
+
+    const userPrompt = `
+  Correct the following transcript. Keep the same formatting and line breaks.
+
+  ---
+  ${text}
+  ---
+    `.trim();
+
+    try {
+      const options = { endpoint, apiKey, deployment, apiVersion, dangerouslyAllowBrowser: true }
+      const client = new AzureOpenAI(options);
+      const resp = await client.chat.completions.create({
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        max_tokens: 4096,
+        temperature: 0.2,
+        top_p: 1,
+        model: modelName,
+      });
+
+      const content = resp?.choices?.[0]?.message?.content ?? '';
+      return String(content).trim();
+    } catch {
+      return '';
+    }
+  }
   async function checkAnomaly(text) {
     if (!detectEnabled || !text) return;
 
@@ -219,7 +279,30 @@ function App() {
       setLastCheckedAt(new Date().toISOString());
     }
   }
+function scheduleAutoCorrect(text) {
+  if (!autoCorrectEnabled) return;
 
+  // debounce ~500ms after last change
+  if (correctDebounceRef.current) {
+    window.clearTimeout(correctDebounceRef.current);
+  }
+  correctDebounceRef.current = window.setTimeout(async () => {
+    const reqId = ++correctInFlightRef.current;
+    setCorrectStatus('Checking');
+
+    const result = await autoCorrectTranscript(text);
+    if (reqId !== correctInFlightRef.current) return; // a newer request superseded this
+
+    if (result) {
+      setCorrected(result);
+      setCorrectStatus('OK');
+      setLastCorrectedAt(new Date().toISOString());
+    } else {
+      setCorrectStatus('Error');
+      setLastCorrectedAt(new Date().toISOString());
+    }
+  }, 500);
+}
   function renderDetectBadge() {
     const base = "inline-flex items-center rounded-full px-3 py-1 text-xs font-medium";
     switch (detectStatus) {
@@ -382,6 +465,57 @@ function App() {
               </div>
             </div>
 
+            <div className="mt-4 rounded-2xl border border-gray-200 bg-white">
+              <div className="flex items-center justify-between p-4">
+                <div className="flex items-center gap-3">
+                  <h3 className="text-sm font-semibold text-gray-900">Auto-Correction</h3>
+                  <span
+                    className={[
+                      "inline-flex items-center rounded-full px-3 py-1 text-xs font-medium",
+                      correctStatus === 'Checking' ? "bg-amber-100 text-amber-700" :
+                      correctStatus === 'OK'       ? "bg-green-100 text-green-700" :
+                      correctStatus === 'Error'    ? "bg-gray-200 text-gray-700" :
+                                                    "bg-gray-100 text-gray-600",
+                    ].join(' ')}
+                  >
+                    {correctStatus === 'Idle' ? 'Idle' : correctStatus}
+                  </span>
+                </div>
+
+                <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    checked={autoCorrectEnabled}
+                    onChange={(e) => setAutoCorrectEnabled(e.target.checked)}
+                  />
+                  Enable
+                </label>
+              </div>
+
+              <div className="px-4 pb-4">
+                <div className="mb-2 max-h-72 overflow-y-auto rounded-xl border border-gray-200 bg-gray-50 p-4">
+                  <div className="whitespace-pre-wrap text-gray-900">
+                    {corrected || (correctStatus === 'Checking' ? '— Correcting… —' : '— No corrected text yet —')}
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => scheduleAutoCorrect(transcript)}
+                    disabled={!autoCorrectEnabled || !transcript || correctStatus === 'Checking'}
+                    className="inline-flex items-center rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Re-correct Now
+                  </button>
+
+                  <div className="text-xs text-gray-500">
+                    Last corrected: {lastCorrectedAt ? new Date(lastCorrectedAt).toLocaleString() : '—'}
+                  </div>
+                </div>
+              </div>
+            </div>
             
 
             {/* Error */}
