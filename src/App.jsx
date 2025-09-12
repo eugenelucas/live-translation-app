@@ -150,7 +150,7 @@ function App() {
     const text = String(_text || '').trim();
      
     const systemPrompt = `
-      You are a strict JSON classifier. Given a call transcript, decide if it indicates an anomaly (possible fraud).
+      You are a strict JSON classifier.Given a call transcript between an agent and a caller, decide if the caller's behavior indicates an anomaly (possible fraud).
       "Anomaly" includes:
       - Requests for or attempts to reveal sensitive personal data (PII): SSN, social security number, credit/debit card numbers, CVV, PIN, passwords, bank account/routing numbers, driver's license, passport, national ID, mother's maiden name, security questions, OTP/2FA codes, etc.
       - Repeated or suspicious attempts to obtain account/benefit/claim details.
