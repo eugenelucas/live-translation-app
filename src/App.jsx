@@ -16,6 +16,7 @@ function App() {
   const [detectStatus, setDetectStatus] = useState('Idle'); // Idle | Checking | OK | Anomaly | Error
   const [detectReason, setDetectReason] = useState('');
   const [lastCheckedAt, setLastCheckedAt] = useState(null);
+  const [anomalies, setAnomalies] = useState([]); 
 
 
   const [autoCorrectEnabled, setAutoCorrectEnabled] = useState(true);
@@ -255,30 +256,44 @@ Return ONLY the corrected text.
     }
   }
   async function checkAnomaly(text) {
-    if (!detectEnabled || !text) return;
+  if (!detectEnabled || !text) return;
 
-    const reqId = ++detectInFlightRef.current;
-    setDetectStatus('Checking');
-    setDetectReason('');
+  const reqId = ++detectInFlightRef.current;
+  setDetectStatus('Checking');
+  setDetectReason('');
 
-    try {
-      const result = await analyzeTranscript(text);
-      // Ignore if a newer request has started
-      if (reqId !== detectInFlightRef.current) return;
+  try {
+    const result = await analyzeTranscript(text);
+    if (reqId !== detectInFlightRef.current) return;
 
-      const isAnomaly = !!result?.isAnomaly;
-      const reason = result?.reason || (isAnomaly ? 'Anomaly detected.' : 'No issues detected.');
+    const isAnomaly = !!result?.isAnomaly;
+    const reason = result?.reason || (isAnomaly ? 'Anomaly detected.' : 'No issues detected.');
 
-      setDetectStatus(isAnomaly ? 'Anomaly' : 'OK');
-      setDetectReason(reason);
-      setLastCheckedAt(new Date().toISOString());
-    } catch (e) {
-      if (reqId !== detectInFlightRef.current) return;
-      setDetectStatus('Error');
-      setDetectReason(e?.message ? String(e.message) : 'Detection failed.');
-      setLastCheckedAt(new Date().toISOString());
-    }
+    const anomalyRecord = {
+      text,
+      status: isAnomaly ? 'Anomaly' : 'OK',
+      reason,
+      timestamp: new Date().toISOString()
+    };
+
+    setAnomalies(prev => [...prev, anomalyRecord]);  // keep history
+    setDetectStatus(anomalyRecord.status);
+    setDetectReason(anomalyRecord.reason);
+    setLastCheckedAt(anomalyRecord.timestamp);
+  } catch (e) {
+    if (reqId !== detectInFlightRef.current) return;
+    const anomalyRecord = {
+      text,
+      status: 'Error',
+      reason: e?.message ? String(e.message) : 'Detection failed.',
+      timestamp: new Date().toISOString()
+    };
+    setAnomalies(prev => [...prev, anomalyRecord]);
+    setDetectStatus('Error');
+    setDetectReason(anomalyRecord.reason);
+    setLastCheckedAt(anomalyRecord.timestamp);
   }
+}
 function scheduleAutoCorrect(text) {
   if (!autoCorrectEnabled) return;
 
@@ -423,20 +438,28 @@ function scheduleAutoCorrect(text) {
                   Enable
                 </label>
               </div>
-              <div className="mt-3 grid gap-3 md:grid-cols-2">
-                <div className="rounded-lg bg-gray-50 p-3">
-                  <div className="text-xs font-medium text-gray-500">Last checked</div>
-                  <div className="text-sm text-gray-900">
-                    {lastCheckedAt ? new Date(lastCheckedAt).toLocaleString() : '—'}
-                  </div>
-                </div>
-                <div className="rounded-lg bg-gray-50 p-3">
-                  <div className="text-xs font-medium text-gray-500">Reason</div>
-                  <div className="text-sm text-gray-900 break-words">
-                    {detectReason || '—'}
-                  </div>
-                </div>
-              </div>
+              <div className="mt-4 rounded-xl border border-gray-200 p-4">
+  <h3 className="text-sm font-semibold text-gray-900 mb-2">Detected Anomalies</h3>
+  {anomalies.length === 0 ? (
+    <div className="text-sm text-gray-500">— No anomalies detected yet —</div>
+  ) : (
+    <ul className="space-y-2 max-h-64 overflow-y-auto">
+      {anomalies.map((a, i) => (
+        <li key={i} className="rounded-lg bg-gray-50 p-3 text-sm">
+          <div className="font-medium">
+            {a.status === 'Anomaly' ? 
+              <span className="text-rose-600">⚠ Anomaly</span> : 
+              <span className="text-green-600">✔ OK</span>}
+          </div>
+          <div className="text-gray-900 mt-1">{a.text}</div>
+          <div className="text-xs text-gray-500">
+            {a.reason} — {new Date(a.timestamp).toLocaleString()}
+          </div>
+        </li>
+      ))}
+    </ul>
+  )}
+</div>
 
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button
