@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import AnomalyFeatures from './pages/AnomalyFeatures'; 
 import Survey from './pages/Survey';
 import SurveySubmit from './pages/SurveySubmit';
+import FeedbackSubmit from './pages/FeedbackSubmit';
 function App() {
   return (
     <Router>
@@ -10,6 +11,7 @@ function App() {
           <Route path="/" element={<AnomalyFeatures />} />
           <Route path="/survey" element={<Survey />} /> 
           <Route path="/survey-submit" element={<SurveySubmit />} />   
+          <Route path="/feedback-submit" element={<FeedbackSubmit />} />   
         </Routes>
       </div>
     </Router>
