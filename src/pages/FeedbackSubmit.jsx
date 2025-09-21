@@ -35,7 +35,7 @@ export default function FeedbackSubmit() {
       const formData = new FormData();
       formData.append('email', email); 
       formData.append('rate',rating);
-      if (feedbackText) formData.append('feedback_text', feedbackText);
+      if (feedbackText) formData.append('feedback', feedbackText);
 
       const response = await fetch(`${backendUrl}/submit-feedback-email`, {
         method: 'POST',
